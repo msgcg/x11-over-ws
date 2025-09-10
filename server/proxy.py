@@ -56,7 +56,8 @@ class DisplayProxy:
             await asyncio.Future()  # run forever
 
     async def ws_handler(self, ws):
-        # ИСПРАВЛЕНО: Получаем путь из атрибута ws.path для совместимости с websockets >= 10.0
+        logging.info("Handler called with object of type: %s", type(ws))
+        logging.info("Attributes of ws object: %s", dir(ws))
         path = ws.path
         logging.info("WS connected for path=%s", path)
         
