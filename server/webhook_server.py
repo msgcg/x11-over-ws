@@ -3,7 +3,7 @@ import hashlib
 import os
 import subprocess
 import sys
-from flask import Flask, request, jsonify, abort
+from flask import Flask, request, jsonify, abort, Response
 
 app = Flask(__name__)
 
@@ -52,9 +52,10 @@ def webhook():
                 if result.stderr:
                     print("Git pull ошибки:")
                     print(result.stderr)
-                # Перезапуск службы через systemd
-                print(f"Служба {SERVICE_NAME} будет перезапущена через systemd.")
-                subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
+                def do_deploy():
+                    print(">>> Запускаю деплой после ответа GitHub")
+                    os.chdir(PROJECT_PATH)
+                    subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
              
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
@@ -72,7 +73,10 @@ def webhook():
                 return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
         else:
             print(f"Получен push в ветку {payload.get('ref')}, игнорирую.")
-        return jsonify({'message': 'Webhook received and processed'})
+        # возвращаем ответ GitHub немедленно
+        response = Response('{"message": "Webhook received"}', mimetype="application/json")
+        response.call_on_close(do_deploy)
+        return response
     else:
         abort(405) # Method Not Allowed
 
