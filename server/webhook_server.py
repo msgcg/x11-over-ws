@@ -12,6 +12,7 @@ app = Flask(__name__)
 GITHUB_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET', 'your_secret_key') # Use a strong, random key
 
 PROJECT_PATH = '/home/ubuntu/x11-over-ws' # Убедитесь, что это правильный путь к вашему проекту
+SERVICE_NAME = 'webhook.service'
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -52,7 +53,9 @@ def webhook():
                     print("Git pull ошибки:")
                     print(result.stderr)
                     print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
-                    sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом 
+                    # Перезапуск службы через systemd
+                    subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
+                    print(f"Служба {SERVICE_NAME} перезапущена через systemd.")
 
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
