@@ -58,7 +58,7 @@ def webhook():
                 from deploy import run_deployment
                 import sys
                 # Check if git pull actually fetched new content and trigger restart if so
-                if "Already up to date." not in result.stdout:
+                if "Already up to date." not in result.stdout and "Already up to date." not in result.stderr:
                     print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
                     sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
 
