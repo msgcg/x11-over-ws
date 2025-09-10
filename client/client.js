@@ -1,7 +1,7 @@
 // client.js
 
 const WS_PROTOCOL = 'wss:';
-const WS_URL = `${WS_PROTOCOL}//${window.location.hostname}:display/99`; // Adjust as needed
+const WS_URL = `wss://${window.location.host}/display/99`;
 const logDiv = document.getElementById('log');
 const loginForm = document.getElementById('login-form');
 const mainContent = document.getElementById('main-content');
