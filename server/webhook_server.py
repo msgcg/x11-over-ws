@@ -1,34 +1,25 @@
 import hmac
 import hashlib
 import os
-import sys
 import subprocess
-from threading import Thread
+import sys
 from flask import Flask, request, jsonify, abort
 
 app = Flask(__name__)
 
 GITHUB_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET', 'your_secret_key')
 PROJECT_PATH = '/home/ubuntu/x11-over-ws'
+DEPLOY_SCRIPT_PATH = os.path.join(PROJECT_PATH, 'server')
 
-def pull_and_restart():
-    """Асинхронный git pull и завершение процесса для systemd"""
+def run_startup_deploy():
+    """Выполнить deploy при старте службы"""
     try:
-        os.chdir(PROJECT_PATH)
-        print(f"Рабочая директория: {os.getcwd()}")
-        result = subprocess.run(['git', 'pull'], capture_output=True, text=True, check=True)
-        print("Git pull выполнен:")
-        print(result.stdout)
-        if result.stderr:
-            print("Ошибки git pull:")
-            print(result.stderr)
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка git pull: {e}", file=sys.stderr)
+        sys.path.append(DEPLOY_SCRIPT_PATH)
+        from deploy import run_deployment
+        print("Запуск деплоя при старте службы...")
+        run_deployment()
     except Exception as e:
-        print(f"Неизвестная ошибка: {e}", file=sys.stderr)
-    finally:
-        print("Перезапуск службы через sys.exit(0)")
-        sys.exit(0)
+        print(f"Ошибка деплоя при старте: {e}", file=sys.stderr)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -48,22 +39,28 @@ def webhook():
     print(f"Payload получен: {payload}")
 
     if payload.get('ref') == 'refs/heads/main':
-        # Запускаем git pull + sys.exit в отдельном потоке
-        Thread(target=pull_and_restart).start()
-        # Отвечаем GitHub сразу
-        return jsonify({'message': 'Webhook received, deployment started'}), 200
+        try:
+            os.chdir(PROJECT_PATH)
+            print(f"Рабочая директория: {os.getcwd()}")
+            result = subprocess.run(['git', 'pull'], capture_output=True, text=True, check=True)
+            print("Git pull выполнен:")
+            print(result.stdout)
+            if result.stderr:
+                print("Git pull ошибки:")
+                print(result.stderr)
+        except subprocess.CalledProcessError as e:
+            print(f"Ошибка git pull: {e}")
+        except Exception as e:
+            print(f"Неизвестная ошибка: {e}")
+
+        # Завершаем процесс, чтобы systemd перезапустил его
+        sys.exit(0)
     else:
         print(f"Push в ветку {payload.get('ref')}, игнорирую.")
-        return jsonify({'message': 'Webhook received, ignored'}), 200
+
+    return jsonify({'message': 'Webhook received'}), 200
 
 if __name__ == '__main__':
-    # При старте службы можно вызвать деплой из deploy.py
-    sys.path.append(os.path.join(PROJECT_PATH, 'server'))
-    try:
-        from deploy import run_deployment
-        print("Запуск деплоя при старте службы...")
-        run_deployment()
-    except Exception as e:
-        print(f"Ошибка деплоя при старте: {e}", file=sys.stderr)
-
+    # Автоматический запуск деплоя при старте службы
+    run_startup_deploy()
     app.run(host='0.0.0.0', port=5000)
