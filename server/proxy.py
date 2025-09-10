@@ -109,3 +109,66 @@ class DisplayProxy:
         self.conns[conn_id] = writer
         logging.info("Assigned conn_id=%d", conn_id)
         # inform browser about new conn
+        try:
+            await self.ws.send(json.dumps({"type": "NEW_CONN", "conn": conn_id}))
+        except Exception:
+            logging.exception("Failed to notify WS about new conn")
+            # cleanup
+            del self.conns[conn_id]
+            writer.close()
+            await writer.wait_closed()
+            return
+
+        try:
+            while True:
+                data = await reader.read(4096)
+                if not data:
+                    break
+                frame = struct.pack("!I", conn_id) + data
+                try:
+                    await self.ws.send(frame)
+                except Exception:
+                    logging.exception("Failed to send frame to WS")
+                    break
+        except Exception:
+            logging.exception("Error in tcp read loop")
+        finally:
+            logging.info("TCP client conn %d closed", conn_id)
+            # notify browser
+            try:
+                if self.ws:
+                    await self.ws.send(json.dumps({"type": "CLOSE_CONN", "conn": conn_id}))
+            except Exception:
+                pass
+            # cleanup
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+            self.conns.pop(conn_id, None)
+
+    async def start(self):
+        ws_srv = websockets.serve(self.ws_handler, self.ws_host, self.ws_port, max_size=None, max_queue=None)
+        tcp_srv = await asyncio.start_server(self.tcp_client_handler, self.tcp_host, self.tcp_port)
+        logging.info("Starting WS server on %s:%d and TCP server on %s:%d", self.ws_host, self.ws_port, self.tcp_host, self.tcp_port)
+        async with ws_srv:
+            async with tcp_srv:
+                await asyncio.Future()  # run forever
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--display", type=int, default=99)
+    p.add_argument("--ws-host", default="0.0.0.0")
+    p.add_argument("--ws-port", type=int, default=8080)
+    p.add_argument("--tcp-host", default="0.0.0.0")
+    args = p.parse_args()
+
+    proxy = DisplayProxy(display=args.display, ws_host=args.ws_host, ws_port=args.ws_port, tcp_host=args.tcp_host)
+    try:
+        asyncio.run(proxy.start())
+    except KeyboardInterrupt:
+        logging.info("Terminated")
+
+if __name__ == "__main__":
+    main()
