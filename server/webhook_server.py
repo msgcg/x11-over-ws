@@ -3,8 +3,7 @@ import subprocess
 import os
 
 app = Flask(__name__)
-
-# Секретный ключ для проверки подписи GitHub (если используется)
+# Секретный ключ для проверки подписи GitHub 
 # Установите его как переменную окружения или в конфигурационном файле
 GITHUB_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET', 'your_secret_key')
 
