@@ -16,6 +16,7 @@ import logging
 import zlib
 from typing import Dict
 import pam # Добавляем импорт pam
+import ssl
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -30,6 +31,30 @@ class DisplayProxy:
         self.next_conn = itertools.count(1)
         self.conns: Dict[int, asyncio.StreamWriter] = {}  # conn_id -> tcp writer
         self._lock = asyncio.Lock()
+
+        self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.ssl_context.load_cert_chain('/certs/fullchain1.pem', '/certs/privkey1.pem')
+
+    async def start(self):
+        logging.info(f"Starting WebSocket server on wss://{self.ws_host}:{self.ws_port}")
+        start_server = websockets.serve(
+            self.ws_handler,
+            self.ws_host,
+            self.ws_port,
+            ssl=self.ssl_context,
+            max_size=None,
+            max_queue=None
+        )
+        await start_server
+
+        logging.info(f"Starting TCP server on tcp://{self.tcp_host}:{self.tcp_port}")
+        tcp_srv = await asyncio.start_server(
+            self.tcp_client_handler,
+            self.tcp_host,
+            self.tcp_port
+        )
+        async with tcp_srv:
+            await asyncio.Future()  # run forever
 
     async def ws_handler(self, ws, path):
         logging.info("WS connected for path=%s", path)
@@ -204,14 +229,6 @@ class DisplayProxy:
             except Exception:
                 pass
             self.conns.pop(conn_id, None)
-
-    async def start(self):
-        ws_srv = websockets.serve(self.ws_handler, self.ws_host, self.ws_port, max_size=None, max_queue=None)
-        tcp_srv = await asyncio.start_server(self.tcp_client_handler, self.tcp_host, self.tcp_port)
-        logging.info("Starting WS server on %s:%d and TCP server on %s:%d", self.ws_host, self.ws_port, self.tcp_host, self.tcp_port)
-        async with ws_srv:
-            async with tcp_srv:
-                await asyncio.Future()  # run forever
 
 def main():
     p = argparse.ArgumentParser()
