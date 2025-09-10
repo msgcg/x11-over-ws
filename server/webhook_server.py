@@ -62,7 +62,7 @@ def webhook():
                     #sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
                 else:
                     print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
-                    sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом 
+                    #sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом 
 
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
