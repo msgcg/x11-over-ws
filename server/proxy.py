@@ -38,7 +38,7 @@ class DisplayProxy:
     async def start(self):
         logging.info(f"Starting WebSocket server on wss://{self.ws_host}:{self.ws_port}")
         start_server = websockets.serve(
-            self.ws_handler,
+            lambda ws, path: self.ws_handler(ws, path),
             self.ws_host,
             self.ws_port,
             ssl=self.ssl_context,
