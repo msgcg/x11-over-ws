@@ -56,8 +56,17 @@ def webhook():
                 import sys
                 sys.path.append(PROJECT_PATH + '/server')
                 from deploy import run_deployment
+                # Check if git pull actually fetched new content
+                if "Already up to date." not in result.stdout:
+                    print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
+                    sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
+
+                # If we reach here, either no new changes, or the service just restarted with new code.
+                # Now, run the deployment logic.
+                import sys
+                sys.path.append(PROJECT_PATH + '/server')
+                from deploy import run_deployment
                 run_deployment()
-                sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
 
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
