@@ -9,7 +9,7 @@ app = Flask(__name__)
 GITHUB_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET', 'your_secret_key')
 
 # Путь к вашему проекту на сервере
-PROJECT_PATH = '/var/www/html/your_project' # Измените на актуальный путь
+PROJECT_PATH = '/home/ubuntu/x11-over-ws/live' # Измените на актуальный путь
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
