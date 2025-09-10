@@ -52,11 +52,10 @@ def webhook():
                 if result.stderr:
                     print("Git pull ошибки:")
                     print(result.stderr)
-                    print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
-                    # Перезапуск службы через systemd
-                    subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
-                    print(f"Служба {SERVICE_NAME} перезапущена через systemd.")
-
+                # Перезапуск службы через systemd
+                print(f"Служба {SERVICE_NAME} будет перезапущена через systemd.")
+                subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
+             
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
                 print(f"Stdout: {e.stdout}", file=sys.stderr)
