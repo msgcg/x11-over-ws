@@ -17,7 +17,7 @@ import zlib
 from typing import Dict
 import pam # Добавляем импорт pam
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
 class DisplayProxy:
     def __init__(self, display: int, ws_host: str, ws_port: int, tcp_host: str):

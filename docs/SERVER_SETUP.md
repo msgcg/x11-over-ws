@@ -190,7 +190,7 @@ server {
 }
 ```
 
-Создайте символическую ссылку на этот файл в `sites-enabled`:
+Создайте символическую ссылку на этот файл в `sites-enabled` (если не хотите, просто переместите конфиг в папку `/etc/nginx/conf.d/`):
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/x11-over-ws /etc/nginx/sites-enabled/
