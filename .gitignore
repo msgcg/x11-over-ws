@@ -1,3 +1,5 @@
 .venv/
 webhook.log
 /server/certs/*
+!/server/certs/.gitkeep
+
