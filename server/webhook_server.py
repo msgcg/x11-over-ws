@@ -51,17 +51,8 @@ def webhook():
                 if result.stderr:
                     print("Git pull ошибки:")
                     print(result.stderr)
-                
-                import sys
-                if "Already up to date." in result.stdout or "Already up to date." in result.stderr:
-                    print("Изменений нет, начинаю процесс деплоинга")
-                    sys.path.append(PROJECT_PATH + '/server')
-                    from deploy import run_deployment
-                    run_deployment()
-                    #sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
-                else:
                     print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
-                    #sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом 
+                    sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом 
 
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
@@ -84,4 +75,10 @@ def webhook():
         abort(405) # Method Not Allowed
 
 if __name__ == '__main__':
+    import sys
+    print("Изменений теперь нет, начинаю процесс деплоинга")
+    sys.path.append(PROJECT_PATH + '/server')
+    from deploy import run_deployment
+    run_deployment()
+    print("Процесс попытки деплоинга завершен")
     app.run(host='0.0.0.0', port=5000)
