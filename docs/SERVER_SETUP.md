@@ -217,12 +217,24 @@ server {
         proxy_pass http://127.0.0.1:8080; # Порт, на котором слушает proxy.py (ws_port)
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade; # Использование переменной из 'map'
         proxy_set_header Host $host;
         proxy_read_timeout 86400s; # Увеличьте таймаут для длительных сессий
+        proxy_send_timeout 86400s;
     }
 }
+
+server {
+    listen 80;
+    server_name your_domain.com;
+    return 301 https://$host$request_uri;
+}
+
 ```
+
+**Важное замечание по ошибке `invalid Connection header: close`:**
+
+Если вы сталкиваетесь с ошибкой `websockets.exceptions.InvalidUpgrade: invalid Connection header: close` в логах `proxy.py` или `426 Upgrade Required` в браузере, это, скорее всего, означает, что Nginx не передает корректные заголовки `Upgrade` и `Connection` для WebSocket-соединения. Убедитесь, что в вашей конфигурации Nginx присутствует `map $http_upgrade $connection_upgrade` и `proxy_set_header Connection $connection_upgrade;` в блоке `location /display/`.
 
 Создайте символическую ссылку на этот файл в `sites-enabled` (если не хотите, просто переместите конфиг в папку `/etc/nginx/conf.d/`):
 
