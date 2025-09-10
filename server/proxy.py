@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 proxy.py
 TCP (X11 clients) <-> WebSocket (browser X-server) multiplexer.
@@ -56,17 +55,20 @@ class DisplayProxy:
         async with tcp_srv:
             await asyncio.Future()  # run forever
 
-    async def ws_handler(self, ws, path):
+    async def ws_handler(self, ws):
+        # ИСПРАВЛЕНО: Получаем путь из атрибута ws.path для совместимости с websockets >= 10.0
+        path = ws.path
         logging.info("WS connected for path=%s", path)
-
-        # Проверяем путь: ожидаем /display/99 или /99
+        
+        # simple path check: /display/99 or /99
         try:
             disp = int(path.strip("/").split("/")[-1])
         except Exception:
+            # ИСПРАВЛЕНО: Используем переменную path, определенную выше
             logging.warning("Invalid path %s, closing", path)
             await ws.close()
             return
-
+            
         if disp != self.display:
             logging.warning("WS for wrong display %d != %d", disp, self.display)
             await ws.close()
@@ -74,7 +76,7 @@ class DisplayProxy:
 
         # Аутентификация
         try:
-            auth_message = await asyncio.wait_for(ws.recv(), timeout=5.0)
+            auth_message = await asyncio.wait_for(ws.recv(), timeout=5.0) # Ожидаем сообщение с учетными данными
             auth_data = json.loads(auth_message)
             username = auth_data.get("username")
             password = auth_data.get("password")
@@ -90,7 +92,6 @@ class DisplayProxy:
                 await ws.send(json.dumps({"type": "AUTH_FAILED", "reason": "Invalid credentials"}))
                 await ws.close()
                 return
-
             logging.info("PAM authentication successful for user: %s", username)
             await ws.send(json.dumps({"type": "AUTH_SUCCESS"}))
 
@@ -107,7 +108,6 @@ class DisplayProxy:
             await ws.close()
             return
 
-        # Привязываем WS к дисплею
         async with self._lock:
             if self.ws:
                 logging.warning("Another WS already attached, closing new one")
@@ -116,18 +116,20 @@ class DisplayProxy:
             self.ws = ws
 
         logging.info("WS bound to display %d", self.display)
-
-        # Основной цикл приёма сообщений
         try:
             async for message in ws:
+                # message can be text (control) or bytes (binary data)
                 if isinstance(message, str):
+                    # control JSON
                     try:
                         obj = json.loads(message)
                         logging.debug("WS control: %s", obj)
+                        # currently no commands expected from browser in prototype
                     except Exception:
                         logging.exception("Bad JSON from ws")
                 else:
-                    if len(message) < 9:
+                    # binary: parse frame
+                    if len(message) < 9: # 1 byte flags + 4 bytes conn_id + 4 bytes payload_len
                         logging.warning("Binary frame too short")
                         continue
                     flags = message[0]
@@ -135,7 +137,7 @@ class DisplayProxy:
                     payload_len = struct.unpack("!I", message[5:9])[0]
                     payload = message[9:9+payload_len]
 
-                    if flags & 1:  # decompress
+                    if flags & 1: # Check for compression flag
                         try:
                             payload = zlib.decompress(payload)
                         except zlib.error as e:
@@ -151,7 +153,7 @@ class DisplayProxy:
         except websockets.exceptions.ConnectionClosed:
             logging.info("WS disconnected")
         finally:
-            # Очистка всех TCP соединений
+            # cleanup on ws close: close all tcp connections
             async with self._lock:
                 self.ws = None
                 conns = list(self.conns.items())
@@ -163,7 +165,6 @@ class DisplayProxy:
                 except Exception:
                     pass
             logging.info("Cleaned up %d connections", len(conns))
-
 
     def authenticate_pam(self, username, password):
         p = pam.pam()
