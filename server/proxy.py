@@ -13,7 +13,9 @@ import json
 import struct
 import itertools
 import logging
+import zlib
 from typing import Dict
+import pam # Добавляем импорт pam
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -43,6 +45,40 @@ class DisplayProxy:
             await ws.close()
             return
 
+        # Аутентификация
+        try:
+            auth_message = await asyncio.wait_for(ws.recv(), timeout=5.0) # Ожидаем сообщение с учетными данными
+            auth_data = json.loads(auth_message)
+            username = auth_data.get("username")
+            password = auth_data.get("password")
+
+            if not username or not password:
+                logging.warning("Missing username or password in authentication message.")
+                await ws.send(json.dumps({"type": "AUTH_FAILED", "reason": "Missing credentials"}))
+                await ws.close()
+                return
+
+            if not self.authenticate_pam(username, password):
+                logging.warning("PAM authentication failed for user: %s", username)
+                await ws.send(json.dumps({"type": "AUTH_FAILED", "reason": "Invalid credentials"}))
+                await ws.close()
+                return
+            logging.info("PAM authentication successful for user: %s", username)
+            await ws.send(json.dumps({"type": "AUTH_SUCCESS"}))
+
+        except asyncio.TimeoutError:
+            logging.warning("Authentication timeout, closing connection.")
+            await ws.close()
+            return
+        except json.JSONDecodeError:
+            logging.warning("Invalid JSON in authentication message.")
+            await ws.close()
+            return
+        except Exception as e:
+            logging.exception("Error during authentication: %s", e)
+            await ws.close()
+            return
+
         async with self._lock:
             if self.ws:
                 logging.warning("Another WS already attached, closing new one")
@@ -63,12 +99,22 @@ class DisplayProxy:
                     except Exception:
                         logging.exception("Bad JSON from ws")
                 else:
-                    # binary -> first 4 bytes conn_id, rest payload
-                    if len(message) < 4:
+                    # binary: parse frame
+                    if len(message) < 9: # 1 byte flags + 4 bytes conn_id + 4 bytes payload_len
                         logging.warning("Binary frame too short")
                         continue
-                    conn_id = struct.unpack("!I", message[:4])[0]
-                    payload = message[4:]
+                    flags = message[0]
+                    conn_id = struct.unpack("!I", message[1:5])[0]
+                    payload_len = struct.unpack("!I", message[5:9])[0]
+                    payload = message[9:9+payload_len]
+
+                    if flags & 1: # Check for compression flag
+                        try:
+                            payload = zlib.decompress(payload)
+                        except zlib.error as e:
+                            logging.error("Decompression error: %s", e)
+                            continue
+
                     writer = self.conns.get(conn_id)
                     if writer:
                         writer.write(payload)
@@ -90,6 +136,10 @@ class DisplayProxy:
                 except Exception:
                     pass
             logging.info("Cleaned up %d connections", len(conns))
+
+    def authenticate_pam(self, username, password):
+        p = pam.pam()
+        return p.authenticate(username, password, service='login')
 
     async def tcp_client_handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         addr = writer.get_extra_info('peername')
@@ -124,7 +174,14 @@ class DisplayProxy:
                 data = await reader.read(4096)
                 if not data:
                     break
-                frame = struct.pack("!I", conn_id) + data
+                
+                flags = 0
+                payload = data
+                if len(data) > 64: # Compress if payload is larger than 64 bytes
+                    payload = zlib.compress(data)
+                    flags |= 1 # Set compression flag
+
+                frame = struct.pack("!BII", flags, conn_id, len(payload)) + payload
                 try:
                     await self.ws.send(frame)
                 except Exception:

@@ -1,3 +1,4 @@
 Flask
 websockets
 aiofiles
+python-pam
