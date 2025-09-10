@@ -10,7 +10,7 @@ def run_deployment():
         print("Устанавливаются зависимости из файла /home/ubuntu/x11-over-ws/requirements.txt...", file=sys.stderr)
         try:
             result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "/home/ubuntu/x11-over-ws/requirements.txt"], capture_output=True, text=True, check=True)
-            print(f"Установка Python зависимостей: {result.stdout}", file=sys.stderr)
+            print(f"Установка зависимостей: {result.stdout}", file=sys.stderr)
             if result.stderr:
                 print(f"Ошибки установки зависимостей: {result.stderr}", file=sys.stderr)
             with open('webhook.log', 'a') as f:
