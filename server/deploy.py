@@ -8,6 +8,8 @@ def run_deployment():
     try:
         # Установка зависимостей внутри текущего виртуального окружения
         print("Устанавливаю зависимости из requirements.txt...", file=sys.stderr)
+        with open('webhook.log', 'a') as f:
+            f.write(f"[{datetime.now()}] installing requirements.txt...\n")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "/home/ubuntu/x11-over-ws/requirements.txt"])
 
         # Пример перезапуска сервиса (если нужно)
