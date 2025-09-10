@@ -7,7 +7,7 @@ def run_deployment():
     
     try:
         # Установка зависимостей внутри текущего виртуального окружения
-        print("Устанавливаю зависимости из файла /home/ubuntu/x11-over-ws/requirements.txt...", file=sys.stderr)
+        print("Устанавливаются зависимости из файла /home/ubuntu/x11-over-ws/requirements.txt...", file=sys.stderr)
         try:
             result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "/home/ubuntu/x11-over-ws/requirements.txt"], capture_output=True, text=True, check=True)
             print(f"Установка зависимостей: {result.stdout}", file=sys.stderr)
