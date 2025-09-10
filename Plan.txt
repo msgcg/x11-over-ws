@@ -1,0 +1,488 @@
+# План действий — «X11 в браузере» (полный, шаг за шагом, готовый для IDE)
+
+Отлично — делаем чистую архитектуру: браузер = X-сервер, сервер Ubuntu не рисует вообще, на нём живёт только минимальный транспортный шлюз (proxy). Ниже — **пошаговый рабочий план**, всё что нужно: окружение, репозиторий, начальный код proxy, systemd, как тестировать, этапы развития и дальнейшие улучшения. Ты сможешь скопировать это в IDE и стартовать прототип.
+
+---
+
+## Краткая схема (для ориентира)
+
+```
+X-клиенты (xfce, xterm, firefox, ...)  <--TCP 6000+D-->  proxy.py (на сервере)
+                                                       WebSocket
+                                                         ↓
+                                         Браузер (X-server на JS, X-over-Ws)
+```
+
+* `D` — номер display (например 99 → TCP порт 6000+99 = 6099).
+* proxy — *только* транспорт (TCP ↔ WebSocket) + лёгкая multiplex логика (см. ниже).
+* Браузер реализует X-сервер (JS): рендер в Canvas/WebGL, WM-поведение, ввод.
+
+---
+
+# Что нужно подготовить (инструменты)
+
+* **Сервер (Ubuntu)** — у тебя уже есть.
+* Python 3.10+ (лучше 3.11).
+* pip, виртуальное окружение.
+* Библиотека `websockets` (async WebSocket server).
+* На клиентской машине (в IDE) — простой веб-сервер (например, `npm` + `vite`/`esbuild` для UI) или просто открыть `index.html`.
+* Рекомендованные пакеты: `pip install websockets aiofiles` (для логирования/статики при надобности).
+
+---
+
+# Структура репозитория (рекомендуемая)
+
+```
+x11-over-ws/
+├─ server/
+│  ├─ proxy.py                # основной TCP<->WS proxy (начальный прототип)
+│  ├─ systemd/                # unit-файлы, скрипты деплоя
+│  └─ requirements.txt
+├─ client/
+│  ├─ index.html
+│  ├─ client.js               # базовый клиент (подключение к WS, протокол multiplex)
+│  └─ ui/                     # React/Vue код или plain JS UI
+├─ docs/
+│  ├─ protocol.md             # спецификация X-over-Ws / framing / control messages
+│  └─ architecture.md
+├─ tools/
+│  ├─ test_x_client.py        # тестовый TCP-клиент для отладки (имитирует X-клиент)
+│  └─ utils.sh                # скрипты (генерация cookie, запуск тестов)
+├─ README.md
+```
+
+---
+
+# Минимальный рабочий прототип — что мы сделаем сначала
+
+1. `proxy.py` — на сервере: слушает TCP-порт (6000+display) и WebSocket-порт (например 8080).
+
+   * Поддерживает **multiplexing**: несколько TCP-соединений (X-clients) мультиплексируем поверх **одного** WebSocket-соединения между прокси и браузером.
+   * Протокол: текстовые JSON для control (NEW\_CONN, CLOSE\_CONN, PING) + двоичные фреймы для данных. Двоичный фрейм = `4 байта (conn_id, big-endian) + payload`.
+2. `client/index.html + client.js` — браузер (тестовая страница): подключается по `wss://server:8080/display/99`, декодирует control сообщения и бинарные фреймы, отображает лог (потом заменим на реальный X-сервер в JS или портируем X11.js).
+3. Тест: `xeyes`/`xterm` на сервере, но **с DISPLAY, указывающим на прокси** (`DISPLAY=localhost:99`), и браузер должен увидеть создание TCP-сессии (на первых шагах — лишь лог New Conn и байты). После этого будем развивать браузерный рендерер.
+
+---
+
+# Протокол (схема) — кратко (положи в docs/protocol.md)
+
+* **Control (text JSON)** — сообщения вида:
+
+  ```json
+  {"type":"NEW_CONN","conn":123}
+  {"type":"CLOSE_CONN","conn":123}
+  {"type":"PING"}
+  ```
+* **Data (binary WebSocket frame)** — `uint32_be(conn_id) || raw_payload`.
+
+  * Прокси преобразует все байты, приходящие по TCP от X-client, в бинарные фреймы с заголовком conn\_id и шлёт в браузер.
+  * Браузер может отправлять binary frames обратно (conn\_id + payload) для передачи в соответствующее TCP соединение.
+
+Причина: X-сервер обслуживает много клиентов одновременно — нам нужен multiplex через один WS (простая и эффективная схема).
+
+---
+
+# Исходный код: `server/proxy.py` (начальный рабочий пример)
+
+Сохрани в `server/proxy.py`. В нём реализована мультиплексированная прокся для одного display. Это **готовый к запуску** скрипт (потребуется установить `websockets`).
+
+```python
+#!/usr/bin/env python3
+"""
+proxy.py
+TCP (X11 clients) <-> WebSocket (browser X-server) multiplexer.
+Usage example:
+  python3 proxy.py --display 99 --ws-host 0.0.0.0 --ws-port 8080 --tcp-host 0.0.0.0
+This will listen TCP on port 6000 + display (e.g. 6099) and WS on ws-port.
+"""
+import asyncio
+import websockets
+import argparse
+import json
+import struct
+import itertools
+import logging
+from typing import Dict
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+class DisplayProxy:
+    def __init__(self, display: int, ws_host: str, ws_port: int, tcp_host: str):
+        self.display = display
+        self.ws_host = ws_host
+        self.ws_port = ws_port
+        self.tcp_host = tcp_host
+        self.tcp_port = 6000 + display
+        self.ws = None  # active websocket for this display (one browser)
+        self.next_conn = itertools.count(1)
+        self.conns: Dict[int, asyncio.StreamWriter] = {}  # conn_id -> tcp writer
+        self._lock = asyncio.Lock()
+
+    async def ws_handler(self, ws, path):
+        logging.info("WS connected for path=%s", path)
+        # simple path check: /display/99 or /99
+        try:
+            disp = int(path.strip("/").split("/")[-1])
+        except Exception:
+            logging.warning("Invalid path %s, closing", path)
+            await ws.close()
+            return
+        if disp != self.display:
+            logging.warning("WS for wrong display %d != %d", disp, self.display)
+            await ws.close()
+            return
+
+        async with self._lock:
+            if self.ws:
+                logging.warning("Another WS already attached, closing new one")
+                await ws.close()
+                return
+            self.ws = ws
+
+        logging.info("WS bound to display %d", self.display)
+        try:
+            async for message in ws:
+                # message can be text (control) or bytes (binary data)
+                if isinstance(message, str):
+                    # control JSON
+                    try:
+                        obj = json.loads(message)
+                        logging.debug("WS control: %s", obj)
+                        # currently no commands expected from browser in prototype
+                    except Exception:
+                        logging.exception("Bad JSON from ws")
+                else:
+                    # binary -> first 4 bytes conn_id, rest payload
+                    if len(message) < 4:
+                        logging.warning("Binary frame too short")
+                        continue
+                    conn_id = struct.unpack("!I", message[:4])[0]
+                    payload = message[4:]
+                    writer = self.conns.get(conn_id)
+                    if writer:
+                        writer.write(payload)
+                        await writer.drain()
+                    else:
+                        logging.warning("No TCP writer for conn %d", conn_id)
+        except websockets.exceptions.ConnectionClosed:
+            logging.info("WS disconnected")
+        finally:
+            # cleanup on ws close: close all tcp connections
+            async with self._lock:
+                self.ws = None
+                conns = list(self.conns.items())
+                self.conns.clear()
+            for cid, w in conns:
+                try:
+                    w.close()
+                    await w.wait_closed()
+                except Exception:
+                    pass
+            logging.info("Cleaned up %d connections", len(conns))
+
+    async def tcp_client_handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        addr = writer.get_extra_info('peername')
+        logging.info("TCP client connected from %s", addr)
+        # Wait until WS is connected
+        wait_tries = 0
+        while self.ws is None:
+            if wait_tries > 600:
+                logging.error("No WS connected for display %d, closing TCP client", self.display)
+                writer.close()
+                await writer.wait_closed()
+                return
+            await asyncio.sleep(0.1)
+            wait_tries += 1
+
+        conn_id = next(self.next_conn)
+        self.conns[conn_id] = writer
+        logging.info("Assigned conn_id=%d", conn_id)
+        # inform browser about new conn
+        try:
+            await self.ws.send(json.dumps({"type": "NEW_CONN", "conn": conn_id}))
+        except Exception:
+            logging.exception("Failed to notify WS about new conn")
+            # cleanup
+            del self.conns[conn_id]
+            writer.close()
+            await writer.wait_closed()
+            return
+
+        try:
+            while True:
+                data = await reader.read(4096)
+                if not data:
+                    break
+                frame = struct.pack("!I", conn_id) + data
+                try:
+                    await self.ws.send(frame)
+                except Exception:
+                    logging.exception("Failed to send frame to WS")
+                    break
+        except Exception:
+            logging.exception("Error in tcp read loop")
+        finally:
+            logging.info("TCP client conn %d closed", conn_id)
+            # notify browser
+            try:
+                if self.ws:
+                    await self.ws.send(json.dumps({"type": "CLOSE_CONN", "conn": conn_id}))
+            except Exception:
+                pass
+            # cleanup
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+            self.conns.pop(conn_id, None)
+
+    async def start(self):
+        ws_srv = websockets.serve(self.ws_handler, self.ws_host, self.ws_port, max_size=None, max_queue=None)
+        tcp_srv = await asyncio.start_server(self.tcp_client_handler, self.tcp_host, self.tcp_port)
+        logging.info("Starting WS server on %s:%d and TCP server on %s:%d", self.ws_host, self.ws_port, self.tcp_host, self.tcp_port)
+        async with ws_srv:
+            async with tcp_srv:
+                await asyncio.Future()  # run forever
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--display", type=int, default=99)
+    p.add_argument("--ws-host", default="0.0.0.0")
+    p.add_argument("--ws-port", type=int, default=8080)
+    p.add_argument("--tcp-host", default="0.0.0.0")
+    args = p.parse_args()
+
+    proxy = DisplayProxy(display=args.display, ws_host=args.ws_host, ws_port=args.ws_port, tcp_host=args.tcp_host)
+    try:
+        asyncio.run(proxy.start())
+    except KeyboardInterrupt:
+        logging.info("Terminated")
+
+if __name__ == "__main__":
+    main()
+```
+
+**Установка зависимостей:**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install websockets
+```
+
+**Запуск:**
+
+```bash
+python server/proxy.py --display 99 --ws-host 0.0.0.0 --ws-port 8080 --tcp-host 127.0.0.1
+# TCP-порт будет 6000+99 = 6099
+```
+
+---
+
+# Клиент (тестовая страница) — `client/client.js` (очень простая)
+
+Это базовый тестовый клиент, который:
+
+* подключается к `ws://server:8080/display/99`
+* принимает control (NEW\_CONN/CLOSE\_CONN) и бинар-фреймы (логирует получение)
+  Ставь это как временный debug-клиент, позже вместо логов внедрим JS-Xсервер.
+
+```html
+<!-- client/index.html -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>X-over-Ws test client</title></head>
+<body>
+<h3>X-over-Ws test client</h3>
+<pre id="log"></pre>
+<script>
+const LOG = (s)=> { document.getElementById('log').textContent += s + "\n"; };
+const ws = new WebSocket("ws://" + location.hostname + ":8080/display/99");
+ws.binaryType = "arraybuffer";
+ws.onopen = ()=> LOG("WS open");
+ws.onmessage = (ev)=>{
+  if (typeof ev.data === "string") {
+    try {
+      const obj = JSON.parse(ev.data);
+      LOG("CTRL: " + JSON.stringify(obj));
+    } catch(e){ LOG("TEXT: " + ev.data); }
+  } else {
+    const buf = new Uint8Array(ev.data);
+    if (buf.length < 4) { LOG("BIN <4"); return; }
+    const conn = (buf[0]<<24)|(buf[1]<<16)|(buf[2]<<8)|buf[3];
+    LOG("DATA conn=" + conn + " len=" + (buf.length-4));
+    // payload is buf.slice(4) — pass to X-server implementation
+  }
+};
+ws.onclose = ()=> LOG("WS closed");
+</script>
+</body>
+</html>
+```
+
+---
+
+# Как запускать тестовые X-приложения (на сервере)
+
+* Подготовь `x11-apps`:
+
+```bash
+sudo apt update
+sudo apt install x11-apps
+```
+
+* Экспортируй DISPLAY так, чтобы X-клиент соединялся по TCP к proxу (display 99):
+
+```bash
+# если proxy слушает на 127.0.0.1:6099
+export DISPLAY=127.0.0.1:99
+# или
+DISPLAY=127.0.0.1:99 xeyes &
+```
+
+> ВАЖНО: `DISPLAY=127.0.0.1:99` заставляет Xlib использовать TCP (порт 6000+99). Если написать `:99`, Xlib попытается использовать unix domain socket (не то нам нужно).
+
+* После запуска `xeyes` в логе браузера (client) должен появиться `NEW_CONN` control, а затем двоичные кадры.
+
+---
+
+# Systemd unit (пример) — `server/systemd/xoverws@.service`
+
+Создай юнит чтобы запускать proxy как сервис для display N:
+
+```
+[Unit]
+Description=X11-over-WS proxy (display %i)
+After=network.target
+
+[Service]
+User=youruser
+WorkingDirectory=/opt/x11-over-ws
+ExecStart=/opt/x11-over-ws/venv/bin/python /opt/x11-over-ws/server/proxy.py --display %i --ws-host 0.0.0.0 --ws-port 8080 --tcp-host 127.0.0.1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Запуск:
+
+```bash
+sudo cp ... /etc/systemd/system/xoverws@.service
+sudo systemctl daemon-reload
+sudo systemctl start xoverws@99.service
+sudo systemctl enable xoverws@99.service
+```
+
+---
+
+# Вопросы безопасности / аутентификация (пока прототип)
+
+* На начальном этапе не используем аутентификацию XAUTH — браузер/JS-сервер принимает всё. Это **небезопасно** и только для тестов.
+* В production:
+
+  * Включить **TLS** для WebSocket (`wss://`) — ставим nginx/traefik, TLS с Let's Encrypt.
+  * Перенести аутентификацию на HTTPS/Token (JWT), proxy будет проверять токен и сопоставлять браузеру с конкретной backend сессией.
+  * Прокси может передавать/проверять MIT-MAGIC-COOKIE-1 (xauth) — вариант: на старте сессии генерируем cookie и ставим его в окружение приложений (или храним в DB).
+  * Ограничить доступ по firewall/ssh туннелям для initial testing.
+
+---
+
+# Этапы разработки (пошаговая дорожная карта — что делать в IDE)
+
+(ниже перечисление задач в порядке реализации; не даю временных оценок — просто приоритеты)
+
+### Этап 0 — репо и окружение (непосредственно в IDE)
+
+* `git init`, создать структуру, добавить README.
+* Настроить Python виртуальное окружение, requirements.
+* Подготовить базовый `client/index.html` и `server/proxy.py` (взяли выше).
+* Добавить `docs/protocol.md`.
+
+### Этап 1 — запустить минимальный прототип
+
+* Запусти proxy на сервер (display 99).
+* Открой `client/index.html` в браузере (на локальной машине/в IDE).
+* На сервере запусти `DISPLAY=127.0.0.1:99 xeyes` или `xterm`.
+* Убедись, что в браузерном логе появляются `NEW_CONN` и данные. Если да — транспорт рабочий.
+
+### Этап 2 — отладка multiplex и стабильность
+
+* Логируй все control message, ошибки, включи reconnect/heartbeat.
+* Сделай очередь при отсутствии WS (reject/queue TCP clients).
+* Добавь CLI опции и systemd unit.
+
+### Этап 3 — браузерная реализация X-сервера (начало)
+
+* Исследуй/форкни X11.js как основу или начни собственную реализацию subset-X:
+
+  * Implement X init handshake parsing (client → server initial packet).
+  * Парсинг основных X11 requests: CreateWindow, MapWindow, PutImage, PolyText, KeyEvent, ButtonEvent. (начать с небольшой подмножины)
+  * Реализуй рендеринг окон в Canvas (каждое "окно" — canvas layer).
+  * Реализуй базовый оконный менеджер (перетаскивание, заголовки, stacking).
+* Интегрируй с proxy protocol: map conn\_id → logical X-connection.
+
+### Этап 4 — запуск XFCE (микро-итерации)
+
+* Запустить простые приложения (xterm, xclock, xeyes), убедиться что работают.
+* Затем попробовать запустить wm / xfce4-session (возможно потребуется расширять X-subset).
+* Исправлять пропущенные X-request'ы по мере поступления ошибок (логировать все неподдержанные запросы).
+
+### Этап 5 — оптимизация / кодеки
+
+* Профилирование трафика. Добавить opcional zlib/zstd сжатие фреймов (на уровне WS).
+* Ввести delta encoding для PutImage (patches) и передачу WebP/VP8 (для видео).
+* Использовать WebGL на клиенте для ускорения compositing.
+
+### Этап 6 — безопасность / продакшн
+
+* TLS, аутентификация, авторизация, аудит (кто подключался).
+* Опции для ограничения bandwidth / quality presets.
+
+### Этап 7 — UI / UX
+
+* Сделать приятный SPA UI: список сессий, запуск/остановка сессии, смена разрешения, кнопки «Запустить XFCE», «Kill app», импорт/экспорт clipboard, drag\&drop файлов.
+
+---
+
+# Тесты и отладка
+
+* `tools/test_x_client.py` — простой TCP клиент, шлёт/принимает байты для проверки proxy.
+* tcpdump / wireshark для анализа пакетов.
+* Инструменты для измерения latency (ping по ws, roundtrip).
+* Логирование непризнанных/неподдерживаемых X-запросов — ключевой инструмент при porting XFCE.
+
+---
+
+# Ограничения, на которые нужно быть готовым
+
+* X11 wire protocol очень богат — не получится покрыть всё за короткое время. Ограничь scope: subset, достаточный для запуска XFCE и набора приложений (terminal, editor, файловый менеджер).
+* Некоторым приложениям (особенно использующим GL / XComposite / XRender / XShm) потребуется сложная поддержка или fallback.
+* Производительность: много мелких X11 команд → большой overhead. На практике компромиссы: batching, сжатие, прогрессивная эмуляция.
+
+---
+
+# Что положить в `docs/architecture.md` (рекомендации для диплома)
+
+* Диаграммы последовательностей (app → proxy → browser) для создания/рисования окон и для событий ввода.
+* Спецификация протокола (control/data frame).
+* Security model: как авторизуются клиенты/браузеры.
+* Тест-кейсы: запуск xeyes/xterm, запуск xfce4-session, тесты на потерю связи/reconnect.
+
+---
+
+# Что я прямо сделал для тебя в этом ответе
+
+* Подготовил **чёткий план** разработки и реализации.
+* Вложил **полноценный рабочий пример** proxy (multiplex TCP↔WS), systemd шаблон и клиент-тест.
+* Описал **как запускать** X-приложения через proxy и что требуется поменять в окружении `DISPLAY`.
+
+---
+
+Если хочешь — прямо сейчас могу:
+
+* добавить `tools/test_x_client.py` (TCP тест-клиент) и пример `README.md` с командами запуска;
+* или расширить client.js до простого "X init handshake parser" (чтобы отлавливать реальные X-init сообщения и видеть их в UI).
+
+Скажи, какой файл хочешь получить следующим (proxy расширить, тест-клиент, или стартовый клиент/X-handshake parser) — и я тут же сгенерирую код для IDE.
