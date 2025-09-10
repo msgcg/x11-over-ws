@@ -40,7 +40,7 @@ class DisplayProxy:
             self.ws_handler,
             self.ws_host,
             self.ws_port,
-            ssl=self.ssl_context,
+            #ssl=self.ssl_context,
             max_size=None,
             max_queue=None
         )
@@ -55,7 +55,7 @@ class DisplayProxy:
         async with tcp_srv:
             await asyncio.Future()  # run forever
 
-    async def ws_handler(self, ws: websockets.WebSocketServerProtocol) -> None:
+    async def ws_handler(self, ws):
             # --- НАЧАЛО ДИАГНОСТИЧЕСКОГО БЛОКА ---
             logging.info("Handler called with object of type: %s", type(ws))
             #logging.info("Attributes of ws object: %s", dir(ws)) # Можно закомментировать или удалить
