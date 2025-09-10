@@ -57,6 +57,7 @@ def webhook():
                 sys.path.append(PROJECT_PATH + '/server')
                 from deploy import run_deployment
                 run_deployment()
+                sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
 
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)

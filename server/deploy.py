@@ -8,9 +8,25 @@ def run_deployment():
     try:
         # Установка зависимостей внутри текущего виртуального окружения
         print("Устанавливаю зависимости из requirements.txt...", file=sys.stderr)
-        with open('webhook.log', 'a') as f:
-            f.write(f"[{datetime.now()}] installing requirements.txt...\n")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "/home/ubuntu/x11-over-ws/requirements.txt"])
+        try:
+            result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "/home/ubuntu/x11-over-ws/requirements.txt"], capture_output=True, text=True, check=True)
+            print(f"Установка зависимостей: {result.stdout}", file=sys.stderr)
+            if result.stderr:
+                print(f"Ошибки установки зависимостей: {result.stderr}", file=sys.stderr)
+            with open('webhook.log', 'a') as f:
+                f.write(f"[{datetime.now()}] installing requirements.txt...\n")
+                f.write(f"Pip install stdout:\n{result.stdout}\n")
+                if result.stderr:
+                    f.write(f"Pip install stderr:\n{result.stderr}\n")
+        except subprocess.CalledProcessError as e:
+            print(f"Ошибка при установке зависимостей: {e}", file=sys.stderr)
+            print(f"Stdout: {e.stdout}", file=sys.stderr)
+            print(f"Stderr: {e.stderr}", file=sys.stderr)
+            with open('webhook.log', 'a') as f:
+                f.write(f"[{datetime.now()}] Error installing requirements: {e}\n")
+                f.write(f"Stdout: {e.stdout}\n")
+                f.write(f"Stderr: {e.stderr}\n")
+            raise # Перевыбрасываем исключение, чтобы оно было обработано выше
 
         # Пример перезапуска сервиса (если нужно)
         # result = subprocess.run(['sudo', 'systemctl', 'restart', 'your_project_service'], capture_output=True, text=True, check=True)
