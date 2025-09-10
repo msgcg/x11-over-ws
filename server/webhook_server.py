@@ -59,7 +59,7 @@ def webhook():
                     sys.path.append(PROJECT_PATH + '/server')
                     from deploy import run_deployment
                     run_deployment()
-                    sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
+                    #sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом
                 else:
                     print("Обнаружены новые изменения. Завершаю процесс для перезапуска службы с новым кодом...")
                     sys.exit(0) # Завершаем процесс, чтобы systemd перезапустил его с новым кодом 
