@@ -1,0 +1,12 @@
+[Unit]
+Description=GitHub Webhook Listener
+After=network.target
+
+[Service]
+User=ubuntu # Замените на вашего пользователя на сервере
+WorkingDirectory=/home/ubuntu/x11-over-ws/server/ # Замените на актуальный путь к директории server
+ExecStart=/usr/bin/python3 webhook_server.py # Убедитесь, что это правильный путь к python3
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
