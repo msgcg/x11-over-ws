@@ -4,16 +4,13 @@ from datetime import datetime
 
 def run_deployment():
     print("Запускаю скрипт развертывания...", file=sys.stderr)
-    # Здесь будет ваша логика для запуска проекта, установки зависимостей и т.д.
-    # Например, перезапуск Gunicorn, Nginx или других сервисов
+    
     try:
-        # Пример: установка зависимостей (если не сделано через systemd service file)
-        # result = subprocess.run(['pip', 'install', '-r', 'requirements.txt'], capture_output=True, text=True, check=True)
-        # print(f"Установка зависимостей: {result.stdout}", file=sys.stderr)
-        # if result.stderr:
-        #     print(f"Ошибки установки зависимостей: {result.stderr}", file=sys.stderr)
+        # Установка зависимостей внутри текущего виртуального окружения
+        print("Устанавливаю зависимости из requirements.txt...", file=sys.stderr)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "/home/ubuntu/x11-over-ws/requirements.txt"])
 
-        # Пример: перезапуск сервиса (замените 'your_project_service' на имя вашего сервиса)
+        # Пример перезапуска сервиса (если нужно)
         # result = subprocess.run(['sudo', 'systemctl', 'restart', 'your_project_service'], capture_output=True, text=True, check=True)
         # print(f"Перезапуск сервиса: {result.stdout}", file=sys.stderr)
         # if result.stderr:
