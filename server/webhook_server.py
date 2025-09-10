@@ -53,12 +53,10 @@ def webhook():
                     print("Git pull ошибки:")
                     print(result.stderr)
 
-                # Log to a file
-                with open('webhook.log', 'a') as f:
-                    f.write(f"[{datetime.now()}] Webhook received, git pull executed.\n")
-                    f.write(f"Git pull output:\n{result.stdout}\n")
-                    if result.stderr:
-                        f.write(f"Git pull errors:\n{result.stderr}\n")
+                import sys
+                sys.path.append(PROJECT_PATH + '/server')
+                from deploy import run_deployment
+                run_deployment()
 
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при выполнении git pull: {e}", file=sys.stderr)
