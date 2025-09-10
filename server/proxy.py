@@ -33,7 +33,7 @@ class DisplayProxy:
         self._lock = asyncio.Lock()
 
         self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        self.ssl_context.load_cert_chain('/certs/fullchain1.pem', '/certs/privkey1.pem')
+        self.ssl_context.load_cert_chain('server/certs/fullchain1.pem', 'server/certs/privkey1.pem')
 
     async def start(self):
         logging.info(f"Starting WebSocket server on wss://{self.ws_host}:{self.ws_port}")
