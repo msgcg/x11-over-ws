@@ -38,7 +38,7 @@ class DisplayProxy:
     async def start(self):
         logging.info(f"Starting WebSocket server on wss://{self.ws_host}:{self.ws_port}")
         start_server = websockets.serve(
-            lambda ws, path: self.ws_handler(ws, path),
+            self.ws_handler,
             self.ws_host,
             self.ws_port,
             ssl=self.ssl_context,
@@ -56,11 +56,11 @@ class DisplayProxy:
         async with tcp_srv:
             await asyncio.Future()  # run forever
 
-    async def ws_handler(self, ws, path):
-        logging.info("WS connected for path=%s", path)
+    async def ws_handler(self, ws):
+        logging.info("WS connected for path=%s", ws.path)
         # simple path check: /display/99 or /99
         try:
-            disp = int(path.strip("/").split("/")[-1])
+            disp = int(ws.path.strip("/").split("/")[-1])
         except Exception:
             logging.warning("Invalid path %s, closing", path)
             await ws.close()
