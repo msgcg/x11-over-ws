@@ -47,10 +47,7 @@ def run_deployment():
             env['DISPLAY'] = '127.0.0.1:99' # Используем display 99, как в Plan.txt
             env['XAUTHORITY'] = os.path.join(PROJECT_ROOT, '.Xauthority') # Предполагаем, что .Xauthority будет в корне проекта
 
-            subprocess.Popen([sys.executable, os.path.join(BASE_DIR, "proxy.py"), "--display", "99"], 
-                             stdout=subprocess.DEVNULL, 
-                             stderr=subprocess.DEVNULL, 
-                             preexec_fn=os.setsid, # Отделяем процесс от родительского
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "proxy.py"), "--display", "99"], 
                              env=env) # Передаем переменные окружения
             print("server/proxy.py запущен.", file=sys.stderr)
             with open('webhook.log', 'a') as f:
