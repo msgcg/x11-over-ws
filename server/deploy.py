@@ -14,7 +14,7 @@ def run_deployment():
             if result.stderr:
                 print(f"Ошибки установки зависимостей: {result.stderr}", file=sys.stderr)
             with open('webhook.log', 'a') as f:
-                f.write(f"[{datetime.now()}] installing requirements.txt...\n")
+                f.write(f"[{datetime.now()}] Installing requirements.txt...\n")
                 f.write(f"Pip install stdout:\n{result.stdout}\n")
                 if result.stderr:
                     f.write(f"Pip install stderr:\n{result.stderr}\n")
