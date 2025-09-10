@@ -1,6 +1,7 @@
 // client.js
 
-const WS_URL = `ws://${window.location.hostname}:8080/display/99`; // Adjust as needed
+const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = `${WS_PROTOCOL}//${window.location.hostname}:8080/display/99`; // Adjust as needed
 const logDiv = document.getElementById('log');
 const loginForm = document.getElementById('login-form');
 const mainContent = document.getElementById('main-content');
